@@ -3,3 +3,7 @@ tmp/*
 
 imgs
 !imgs/.gitkeep
+
+# go cache
+.gocache
+.gomodcache

@@ -35,6 +35,9 @@ func cmdListDevices() *cli.Command {
 			if err != nil {
 				return err
 			}
+			if !isTTY(os.Stdout) {
+				return json.NewEncoder(os.Stdout).Encode(infos)
+			}
 			if len(infos) == 0 {
 				fmt.Printf("No devices. Looking for VID=%04x PID=%04x\n", common.VID, common.PID)
 				return nil
