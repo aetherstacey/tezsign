@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	rootPartitionSizeMB = uint64(2200)
+	rootPartitionSizeMB = uint64(756)
 )
 
 func init() {

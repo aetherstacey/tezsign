@@ -17,12 +17,12 @@ jobs:
                       artifact_id: "radxa_zero3_dev"
                       armbian_release: "trixie"
                       armbian_boot_scenario: "binman-atf-mainline"
-                      tezsign-flavour: "dev"
+                      tezsign_flavour: "dev"
                     - board: "radxa-zero3"
                       artifact_id: "radxa_zero3"
                       armbian_release: "trixie"
                       armbian_boot_scenario: "binman-atf-mainline"
-                      tezsign-flavour: "prod"
+                      tezsign_flavour: "prod"
 
         steps:
             - name: Checkout
@@ -36,6 +36,7 @@ jobs:
                   armbian_board: ${{ matrix.board }}
                   armbian_release: ${{ matrix.armbian_release }}
                   armbian_boot_scenario: ${{ matrix.armbian_boot_scenario || '' }}
+                  tezsign_flavour: ${{ matrix.tezsign_flavour }}
 
     build-gadget:
         runs-on: ubuntu-latest
@@ -51,11 +52,11 @@ jobs:
                     - image_id: "radxa_zero3"
                       source_artifact: "radxa_zero3"
                       create_binary_artifact: "false"
-                      tezsign-flavour: "prod"
+                      tezsign_flavour: "prod"
                     - image_id: "radxa_zero3"
                       source_artifact: "radxa_zero3_dev"
                       create_binary_artifact: "false"
-                      tezsign-flavour: "dev"
+                      tezsign_flavour: "dev"
         steps:
             - uses: actions/checkout@v5
               with:
@@ -67,6 +68,7 @@ jobs:
                 image_id: ${{ matrix.image_id }}
                 source_artifact: ${{ matrix.source_artifact }}
                 create_binary_artifact: ${{ matrix.create_binary_artifact }}
+                tezsign_flavour: ${{ matrix.tezsign_flavour }}
 
     cleanup-artifacts:
         runs-on: ubuntu-latest
