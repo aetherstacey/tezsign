@@ -149,14 +149,14 @@ func obtainPassword(prompt string, withEnv bool) ([]byte, error) {
 			}
 			val := strings.TrimSpace(pm.ti.Value())
 			if val == "" {
-				return nil, fmt.Errorf("empty passphrase")
+				return nil, ErrEmptyPassphrase
 			}
 
 			return []byte(val), nil
 		}
 	}
 
-	return nil, fmt.Errorf("empty passphrase")
+	return nil, ErrEmptyPassphrase
 }
 
 // renderAliasChips lays out multi-line “chips” with the provided style and wraps by terminal width.
