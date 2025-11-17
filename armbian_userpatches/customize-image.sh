@@ -7,6 +7,8 @@ set -e
 sudo apt update
 
 grep -Fvf <(dpkg-query -W -f='${Package}\n' | sed 's/^/#/') /tmp/overlay/packages_to_purge.txt | \
-    xargs sudo apt purge --assume-yes
+    xargs sudo apt purge --assume-yes --allow-remove-essential
+
+sudo apt autoremove --assume-yes
 
 touch /root/.no_rootfs_resize
