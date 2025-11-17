@@ -145,7 +145,7 @@ func obtainPassword(prompt string, withEnv bool) ([]byte, error) {
 		} else {
 			pm := res.(passModel)
 			if pm.aborted {
-				return nil, fmt.Errorf("aborted")
+				return nil, ErrAborted
 			}
 			val := strings.TrimSpace(pm.ti.Value())
 			if val == "" {

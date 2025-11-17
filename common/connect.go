@@ -126,7 +126,7 @@ func ResetDevice(serial string, l *slog.Logger) error {
 	}()
 
 	if len(devs) == 0 {
-		return fmt.Errorf("no devices with VID=%04x PID=%04x", VID, PID)
+		return fmt.Errorf("%w: VID=%04x PID=%04x", ErrNoDevices, VID, PID)
 	}
 
 	// choose device
@@ -151,12 +151,12 @@ func ResetDevice(serial string, l *slog.Logger) error {
 	}
 
 	if chosen == nil {
-		return fmt.Errorf("no device with VID=%04x PID=%04x serial=%q (have: %v)", VID, PID, serial, alts)
+		return fmt.Errorf("%w: VID=%04x PID=%04x serial=%q (have: %v)", ErrDeviceNotFound, VID, PID, serial, alts)
 	}
 
 	l.Info("USB port reset", slog.String("serial", chosenSerial))
 	if err := chosen.Reset(); err != nil {
-		return fmt.Errorf("usb: reset failed: %w", err)
+		return fmt.Errorf("%w: %w", ErrUSBResetFailed, err)
 	}
 	return nil
 }
@@ -188,7 +188,7 @@ func Connect(p ConnectParams) (*Session, error) {
 	}
 
 	if p.Channel != ChanSign && p.Channel != ChanMgmt {
-		return nil, fmt.Errorf("Connect: Channel must be ChanSign or ChanMgmt")
+		return nil, ErrInvalidChannel
 	}
 
 	ctx := gousb.NewContext()
@@ -215,7 +215,7 @@ func Connect(p ConnectParams) (*Session, error) {
 
 	if len(devs) == 0 {
 		ctx.Close()
-		return nil, fmt.Errorf("no devices with VID=%04x PID=%04x", VID, PID)
+		return nil, fmt.Errorf("%w: VID=%04x PID=%04x", ErrNoDevices, VID, PID)
 	}
 
 	// Gather serials for diagnostics
@@ -237,7 +237,7 @@ func Connect(p ConnectParams) (*Session, error) {
 		}
 		if chosen == nil {
 			ctx.Close()
-			return nil, fmt.Errorf("no device with VID=%04x PID=%04x serial=%q (have: %v)", VID, PID, p.Serial, alts)
+			return nil, fmt.Errorf("%w: VID=%04x PID=%04x serial=%q (have: %v)", ErrDeviceNotFound, VID, PID, p.Serial, alts)
 		}
 	} else {
 		if len(devs) > 1 {
@@ -300,7 +300,7 @@ func Connect(p ConnectParams) (*Session, error) {
 	if cfgNum == -1 || len(ifaces) == 0 {
 		ctx.Close()
 		_ = chosen.Close()
-		return nil, fmt.Errorf("gadget not ready: no vendor-specific (FFS) interface exposed")
+		return nil, ErrGadgetNotReady
 	}
 
 	sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].ifaceNum < ifaces[j].ifaceNum })
@@ -323,9 +323,9 @@ func Connect(p ConnectParams) (*Session, error) {
 		if ok, err := VendorReadyInInterface(chosen, VendorReqReady, uint16(ie.ifaceNum), l); !ok {
 			intf.Close()
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("vendor probe iface %d: %w", ie.ifaceNum, err)
+				return nil, nil, nil, fmt.Errorf("%w: iface %d: %w", ErrVendorProbeFailed, ie.ifaceNum, err)
 			}
-			return nil, nil, nil, fmt.Errorf("iface %d not ready", ie.ifaceNum)
+			return nil, nil, nil, fmt.Errorf("%w: iface %d", ErrInterfaceNotReady, ie.ifaceNum)
 		}
 
 		outEp, err := intf.OutEndpoint(int(ie.epOut & 0x0f))
@@ -350,7 +350,7 @@ func Connect(p ConnectParams) (*Session, error) {
 			_ = cfg.Close()
 			ctx.Close()
 			_ = chosen.Close()
-			return nil, fmt.Errorf("no management interface present")
+			return nil, ErrNoManagementIface
 		}
 		pick = ifaces[1]
 	}
@@ -396,10 +396,10 @@ func Connect(p ConnectParams) (*Session, error) {
 func interfaceClaimError(ifaceNum int, err error) error {
 	switch ifaceNum {
 	case 0:
-		return fmt.Errorf("Unable to connect to sign interface of the device, device is busy")
+		return ErrSignInterfaceBusy
 	case 1:
-		return fmt.Errorf("Unable to connect to management interface of the device, device is busy")
+		return ErrMgmtInterfaceBusy
 	default:
-		return fmt.Errorf("claim iface %d: %w", ifaceNum, err)
+		return fmt.Errorf("%w: iface %d: %w", ErrInterfaceClaimFailed, ifaceNum, err)
 	}
 }

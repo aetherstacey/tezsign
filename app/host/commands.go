@@ -143,7 +143,7 @@ func cmdRun() *cli.Command {
 				return fmt.Errorf("run: status: %w", err)
 			}
 			if st == nil || len(st.GetKeys()) == 0 {
-				return fmt.Errorf("device has no keys. Run `tezsign-host init` then `tezsign-host new` first")
+				return ErrDeviceHasNoKeys
 			}
 
 			// Build allow-list from env or args; if empty, allow ALL existing keys
@@ -154,7 +154,7 @@ func cmdRun() *cli.Command {
 					allow = append(allow, k.GetKeyId())
 				}
 				if len(allow) == 0 {
-					return fmt.Errorf("device has no keys. Run `tezsign-host init` then `tezsign-host new` first")
+					return ErrDeviceHasNoKeys
 				}
 				l.Info("no aliases provided; allowing all keys from device", slog.Any("keys", allow))
 			}
@@ -411,10 +411,10 @@ func cmdUnlock() *cli.Command {
 					return err
 				}
 				if aborted {
-					return fmt.Errorf("aborted")
+					return ErrAborted
 				}
 				if len(chosen) == 0 {
-					return fmt.Errorf("no keys selected")
+					return ErrNoKeysSelected
 				}
 				keys = chosen
 			}
@@ -505,10 +505,10 @@ func cmdLock() *cli.Command {
 					return err
 				}
 				if aborted {
-					return fmt.Errorf("aborted")
+					return ErrAborted
 				}
 				if len(chosen) == 0 {
-					return fmt.Errorf("no keys selected")
+					return ErrNoKeysSelected
 				}
 				keys = chosen
 			}
