@@ -9,4 +9,5 @@ const (
 	rpcBadPayload     uint32 = 34
 
 	rpcDeleteThrottled uint32 = 92
+	rpcDeleteBadPass   uint32 = 93
 )

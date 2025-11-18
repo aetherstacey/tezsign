@@ -317,14 +317,18 @@ func run(l *slog.Logger) error {
 				return marshalErr(91, "delete_keys: passphrase required"), nil
 			}
 			if ok, wait := securedRPCLimiter.Allow(); !ok {
-				l.Warn("delete throttled", slog.Duration("retry_in", wait))
+				l.Warn("delete_keys throttled", slog.Duration("retry_in", wait))
 				msg := fmt.Sprintf(
-					"delete throttled: retry in ~%s (max %d attempts per %s)",
+					"delete_keys throttled: retry in ~%s (max %d attempts per %s)",
 					wait.Round(time.Second),
 					securedAttemptLimit,
 					securedAttemptWindow,
 				)
 				return marshalErr(rpcDeleteThrottled, msg), nil
+			}
+			if err := kr.VerifyMasterPassword(pass); err != nil {
+				l.Warn("delete_keys: bad passphrase", slog.Any("err", err))
+				return marshalErr(rpcDeleteBadPass, "delete_keys: invalid passphrase"), nil
 			}
 
 			results := make([]*signer.PerKeyResult, 0, len(ids))

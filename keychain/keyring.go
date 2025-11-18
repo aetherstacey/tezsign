@@ -322,6 +322,15 @@ func (kr *KeyRing) DeleteKey(wanted string) error {
 	return kr.store.removeKey(id)
 }
 
+func (kr *KeyRing) VerifyMasterPassword(masterPassword []byte) error {
+	_, seed, err := kr.store.readSeed(masterPassword)
+	if err != nil {
+		return err
+	}
+	MemoryWipe(seed)
+	return nil
+}
+
 func (kr *KeyRing) Status() []*signer.KeyStatus {
 	ids, err := kr.store.list()
 	if err != nil {
