@@ -24,19 +24,12 @@ type signResp struct {
 	Signature string `json:"signature"`
 }
 
-func findStatusByTz4(st *signer.StatusResponse, id string) *signer.KeyStatus {
-	if st == nil {
-		return nil
-	}
-	for _, k := range st.GetKeys() {
-		if k.GetTz4() == id {
-			return k
-		}
-	}
-	return nil
+type tz4CacheEntry struct {
+	publicKey string
+	pop       string
 }
 
-func buildFiberApp(getB func() *broker.Broker, l *slog.Logger, allowedTZ4 map[string]struct{}) *fiber.App {
+func buildFiberApp(getB func() *broker.Broker, l *slog.Logger, allowedTZ4 map[string]struct{}, cache map[string]tz4CacheEntry) *fiber.App {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 		ReadTimeout:           10 * time.Second,
@@ -73,22 +66,37 @@ func buildFiberApp(getB func() *broker.Broker, l *slog.Logger, allowedTZ4 map[st
 		if tz4 == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing PKH"})
 		}
+		if _, ok := allowedTZ4[tz4]; !ok {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key not found"})
+		}
 
-		st, err := common.ReqStatus(getB())
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		entry, ok := cache[tz4]
+		if !ok {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key not found"})
+		}
+
+		return c.JSON(fiber.Map{"public_key": entry.publicKey})
+	})
+
+	// -------------------------------------------------------------------------
+	// GET /bls_prove_possession/:tz4 → return {"bls_prove_possession":"BLsig..."}
+	// -------------------------------------------------------------------------
+	app.Get("/bls_prove_possession/:tz4", func(c *fiber.Ctx) error {
+		tz4 := c.Params("tz4")
+		if tz4 == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing PKH"})
 		}
 
 		if _, ok := allowedTZ4[tz4]; !ok {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key not found"})
 		}
 
-		ks := findStatusByTz4(st, tz4)
-		if ks == nil {
+		entry, ok := cache[tz4]
+		if !ok {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key not found"})
 		}
 
-		return c.JSON(fiber.Map{"public_key": ks.GetBlPubkey()})
+		return c.JSON(fiber.Map{"bls_prove_possession": entry.pop})
 	})
 
 	// -------------------------------------------------------------------------

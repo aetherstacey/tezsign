@@ -188,6 +188,18 @@ func cmdRun() *cli.Command {
 					slog.String("locked", strings.Join(locked, ", ")))
 			}
 
+			cachedKeys := make(map[string]tz4CacheEntry, len(allowSet))
+			for _, ks := range st.GetKeys() {
+				tz4 := ks.GetTz4()
+				if _, ok := allowSet[tz4]; !ok {
+					continue
+				}
+				cachedKeys[tz4] = tz4CacheEntry{
+					publicKey: ks.GetBlPubkey(),
+					pop:       ks.GetPop(),
+				}
+			}
+
 			addr := c.String("listen")
 			noRetry := c.Bool("no-retry")
 
@@ -202,7 +214,7 @@ func cmdRun() *cli.Command {
 			}
 
 			// Start HTTP server with allow-list
-			app := buildFiberApp(getBroker, l, allowSet)
+			app := buildFiberApp(getBroker, l, allowSet, cachedKeys)
 
 			httpErrCh := make(chan error, 1)
 			go func() {
