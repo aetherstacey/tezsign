@@ -218,7 +218,7 @@ jobs:
               artifact-id: tezsign-host-windows-amd64
               goos: windows
               goarch: amd64
-              libusb-host: x86_64-mingw-gnu
+              libusb-host: x86_64-w64-mingw32
 
     build-host-windows-arm64:
         runs-on: ubuntu-latest
@@ -234,7 +234,7 @@ jobs:
               artifact-id: tezsign-host-windows-arm64
               goos: windows
               goarch: arm64
-              libusb-host: aarch64-mingw-gnu
+              libusb-host: aarch64-w64-mingw32
 
     publish:
         runs-on: ubuntu-latest
