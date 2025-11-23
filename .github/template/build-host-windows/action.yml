@@ -1,0 +1,67 @@
+name: build-host
+description: Build the host application for the specified OS and architecture
+
+inputs:
+  artifact-id:
+    description: 'The ID of the artifact to build'
+    required: true
+  goos:
+    description: 'The GOOS value for the build'
+    required: true
+  goarch:
+    description: 'The GOARCH value for the build'
+    required: true
+  libusb-host:
+    description: 'The libusb host target'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+  - name: Set up Go
+    uses: actions/setup-go@v4
+    with:
+      go-version: '>=1.25.0'
+
+  - uses: mlugg/setup-zig@v2
+    with:
+      version: '0.15.2'
+
+  - name: install pkgconfig
+    shell: powershell
+    run: |
+      choco install pkgconfiglite -y
+
+  - name: install libusb with vcpkg
+    shell: powershell
+    env:
+      VCPKG_DEFAULT_TRIPLET: ${{ inputs.libusb-host }}
+      CC: zig cc -target ${{ inputs.toolchain }}
+      CXX: zig c++ -target ${{ inputs.toolchain }}
+    run: |
+      git clone https://github.com/Microsoft/vcpkg.git
+      cd vcpkg
+      ./bootstrap-vcpkg.bat
+      ./vcpkg integrate install
+      vcpkg install libusb
+    
+  - name: Build host (linux)
+    shell: bash
+    env:
+      CC: zig cc -target ${{ inputs.toolchain }}
+      CXX: zig c++ -target ${{ inputs.toolchain }}
+      GOOS: ${{ inputs.goos }}
+      GOARCH: ${{ inputs.goarch }}
+      CGO_ENABLED: 1
+      PKG_CONFIG_PATH: "${{ github.workspace }}/vcpkg/packages/libusb_${{ inputs.libusb-host }}/lib/pkgconfig"
+      LIB_PATH: "${{ github.workspace }}/vcpkg/packages/libusb_${{ inputs.libusb-host }}/lib"
+      INCLUDE_PATH: "${{ github.workspace }}/vcpkg/packages/libusb_${{ inputs.libusb-host }}/include/libusb-1.0"
+    run: |
+      ls ${LIB_PATH}
+      go build -ldflags="-s -w -extldflags \"-I${INCLUDE_PATH} ${LIB_PATH}/libusb-1.0.a -static\"" -trimpath -o ./build/tezsign-host-${{ inputs.goos }}-${{ inputs.goarch }}.exe ./app/host
+
+  - uses: actions/upload-artifact@v4
+    with:
+      name: ${{ inputs.artifact-id }}
+      path: ./build/tezsign-host-${{ inputs.goos }}-${{ inputs.goarch }}.exe
+      retention-days: 1

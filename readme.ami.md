@@ -37,20 +37,42 @@ For detailed instructions on device setup, please refer to the main README under
         user: <username>
     }
     ```
-
 4.  **Set up the app**
     `ami --path=/ami-apps/tezsign setup`
 
-5.  **Start the service**
+5. **Initialize and Edit TezSign Configuration**  
+    Run the following command to initialize the TezSign configuration:  
+    `ami --path=/ami-apps/tezsign setup-tezsign --init --platform`  
+
+    This command generates a configuration file named `tezsign.config.hjson`.  
+    You can modify this file as needed. To apply any changes, rerun the `ami --path=/ami-apps/tezsign setup` command.
+
+    > **NOTE:** Avoid overriding the `listen` property in `tezsign.config.hjson`.
+
+6.  **Start the service**
     Start the TezSign service:
     `ami --path=/ami-apps/tezsign start`
 
-6.  **Check status**
+7.  **Check status**
     Check the TezSign status:
     `ami --path=/ami-apps/tezsign info`
 
 You can now run `tezsign`-specific commands using:
 `ami --path=/ami-apps/tezsign tezsign`
+
+---
+
+#### Enable Automatic Unlock
+
+To enable automatic unlock, set a password by running the following command:  
+`ami --path=/ami-apps/tezsign setup-tezsign --password`  
+
+You will be prompted to enter a password. After submitting the password, run:  
+`ami --path=/ami-apps/tezsign setup`  
+
+This will apply the changes and enable the automatic unlock feature.
+
+> **NOTE:** To remove the password for automatic unlock, simply submit an empty password when prompted during the `ami --path=/ami-apps/tezsign setup-tezsign --password` command.
 
 ---
 
