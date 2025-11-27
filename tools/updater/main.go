@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
@@ -54,6 +56,22 @@ type selectionModel struct {
 	selectedDevice *deviceCandidate
 	selectedKind   UpdateKind
 	err            error
+}
+
+type decompressModel struct {
+	source string
+	target string
+	total  int64
+	reader *countingReader
+	cancel func()
+	err    error
+	done   bool
+}
+
+type tickMsg time.Time
+
+type finishMsg struct {
+	err error
 }
 
 func newSelectionModel(devices []deviceCandidate) selectionModel {
@@ -108,6 +126,91 @@ func newTableStyles() table.Styles {
 
 func (m selectionModel) Init() tea.Cmd {
 	return nil
+}
+
+func newDecompressModel(source, target string, total int64, reader *countingReader, cancel func()) decompressModel {
+	return decompressModel{
+		source: source,
+		target: target,
+		total:  total,
+		reader: reader,
+		cancel: cancel,
+	}
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+func (m decompressModel) Init() tea.Cmd {
+	return tickCmd()
+}
+
+func (m decompressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tickMsg:
+		if m.done {
+			return m, nil
+		}
+		return m, tickCmd()
+	case finishMsg:
+		m.done = true
+		m.err = msg.err
+		return m, tea.Quit
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			if !m.done && m.cancel != nil {
+				m.cancel()
+			}
+			m.done = true
+			m.err = errors.New("decompression cancelled")
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func renderProgressBar(pct float64, width int) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	fill := int((pct / 100) * float64(width))
+	if fill > width {
+		fill = width
+	}
+	return fmt.Sprintf("[%s%s] %5.1f%%", strings.Repeat("█", fill), strings.Repeat("░", width-fill), pct)
+}
+
+func (m decompressModel) View() string {
+	read := m.reader.BytesRead()
+	var pct float64 = -1
+	if m.total > 0 {
+		pct = float64(read) / float64(m.total) * 100
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("Decompressing %s → %s\n\n", m.source, m.target))
+	if pct >= 0 {
+		builder.WriteString(renderProgressBar(pct, 40))
+		builder.WriteString(fmt.Sprintf("  %s / %s\n", byteCountToHumanReadable(read), byteCountToHumanReadable(m.total)))
+	} else {
+		builder.WriteString(fmt.Sprintf("%s read\n", byteCountToHumanReadable(read)))
+	}
+
+	if m.done {
+		if m.err != nil {
+			builder.WriteString(fmt.Sprintf("\nError: %v\n", m.err))
+		} else {
+			builder.WriteString("\nDone.\n")
+		}
+	}
+	return builder.String()
 }
 
 func (m selectionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -347,6 +450,21 @@ func loadImage(path string, mode diskfs.OpenModeOption) (*disk.Disk, part.Partit
 	return disk, bootPartition, rootfsPartition, appPartition, nil
 }
 
+type countingReader struct {
+	r    io.Reader
+	read int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	atomic.AddInt64(&c.read, int64(n))
+	return n, err
+}
+
+func (c *countingReader) BytesRead() int64 {
+	return atomic.LoadInt64(&c.read)
+}
+
 func maybeDecompressSource(path string, logger *slog.Logger) (string, func(), error) {
 	if !strings.HasSuffix(path, ".xz") {
 		return path, func() {}, nil
@@ -356,26 +474,54 @@ func maybeDecompressSource(path string, logger *slog.Logger) (string, func(), er
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to open compressed source %s: %w", path, err)
 	}
-	defer f.Close()
+	stat, _ := f.Stat()
+	totalBytes := stat.Size()
 
-	r, err := xz.NewReader(f)
+	cr := &countingReader{r: f}
+	r, err := xz.NewReader(cr)
 	if err != nil {
+		f.Close()
 		return "", nil, fmt.Errorf("failed to create xz reader: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp("", "tezsign_img_*.img")
 	if err != nil {
+		f.Close()
 		return "", nil, fmt.Errorf("failed to create temp file for decompression: %w", err)
 	}
 
 	logger.Info("Decompressing source image", "source", path, "destination", tmpFile.Name())
 
-	if _, err := io.Copy(tmpFile, r); err != nil {
+	cancel := func() {
+		f.Close()
 		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-		return "", nil, fmt.Errorf("failed to decompress source image: %w", err)
 	}
-	tmpFile.Close()
+
+	p := tea.NewProgram(newDecompressModel(filepath.Base(path), tmpFile.Name(), totalBytes, cr, cancel))
+
+	go func() {
+		_, copyErr := io.Copy(tmpFile, r)
+		tmpFile.Close()
+		f.Close()
+		p.Send(finishMsg{err: copyErr})
+	}()
+
+	model, progErr := p.Run()
+	if progErr != nil {
+		os.Remove(tmpFile.Name())
+		return "", nil, fmt.Errorf("failed to render decompress progress: %w", progErr)
+	}
+
+	res, ok := model.(decompressModel)
+	if !ok {
+		os.Remove(tmpFile.Name())
+		return "", nil, errors.New("unexpected model type after decompression")
+	}
+
+	if res.err != nil {
+		os.Remove(tmpFile.Name())
+		return "", nil, fmt.Errorf("failed to decompress source image: %w", res.err)
+	}
 
 	cleanup := func() {
 		os.Remove(tmpFile.Name())
