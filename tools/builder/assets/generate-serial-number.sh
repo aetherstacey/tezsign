@@ -72,9 +72,7 @@ main() {
   raw="$(compute_serial_raw || true)"
   [[ -z "${raw:-}" ]] && raw="$(head -c 16 /dev/urandom | xxd -p -c 32)"
   serial="$(sanitize_serial "$raw")"
-  mkdir -p "$(dirname "$APP_ID_FILE")"
-  mountpoint -q /data || true
-  mount -o remount,rw /data 2>/dev/null || true
+  mount -o remount,rw /data
   persist_serial "$serial"
   printf '%s\n' "$serial"
 }
