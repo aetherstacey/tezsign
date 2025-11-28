@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 
 	"github.com/diskfs/go-diskfs"
-	"github.com/diskfs/go-diskfs/disk"
-	"github.com/diskfs/go-diskfs/filesystem"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"github.com/diskfs/go-diskfs/partition/mbr"
 	"github.com/diskfs/go-diskfs/partition/part"
@@ -208,20 +207,12 @@ func formatPartitionTable(path string, flavour imageFlavour, logger *slog.Logger
 
 	// mkfs.ext4 -E offset=104857600,root_owner=1000:1000 -F disk.img 51200K
 	slog.Info("Formatting app and data partitions", slog.Int64("app_offset", appPartitionOffset), slog.Int64("app_size", appPartitionSize), slog.Int64("data_offset", dataPartitionOffset), slog.Int64("data_size", dataPartitionSize))
-	if _, err := img.CreateFilesystem(disk.FilesystemSpec{
-		Partition:   appPartitionIndex + 1,
-		FSType:      filesystem.TypeExt4,
-		VolumeLabel: constants.AppPartitionLabel,
-	}); err != nil {
+	if err := exec.Command("mkfs.ext4", "-E", fmt.Sprintf("offset=%d", appPartitionOffset), "-F", path, fmt.Sprintf("%dK", appPartitionSize/1024), "-L", constants.AppPartitionLabel).Run(); err != nil {
 		return errors.Join(common.ErrFailedToFormatPartition, err)
 	}
 
 	slog.Info("Formatting data partition", slog.Int64("data_offset", dataPartitionOffset), slog.Int64("data_size", dataPartitionSize))
-	if _, err := img.CreateFilesystem(disk.FilesystemSpec{
-		Partition:   dataPartitionIndex + 1,
-		FSType:      filesystem.TypeExt4,
-		VolumeLabel: constants.DataPartitionLabel,
-	}); err != nil {
+	if err := exec.Command("mkfs.ext4", "-E", fmt.Sprintf("offset=%d", dataPartitionOffset), "-F", path, fmt.Sprintf("%dK", dataPartitionSize/1024), "-L", constants.DataPartitionLabel).Run(); err != nil {
 		return errors.Join(common.ErrFailedToFormatPartition, err)
 	}
 

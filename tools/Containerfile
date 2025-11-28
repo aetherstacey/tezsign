@@ -6,6 +6,7 @@ RUN apt-get update && \
     fuse2fs \
     fuse3 \
     xz-utils \
+    e2fsprogs \
     wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
