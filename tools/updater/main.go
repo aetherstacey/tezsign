@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"github.com/diskfs/go-diskfs"
 	"github.com/diskfs/go-diskfs/backend/file"
 	"github.com/diskfs/go-diskfs/disk"
+	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/partition"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"github.com/diskfs/go-diskfs/partition/mbr"
 	"github.com/diskfs/go-diskfs/partition/part"
@@ -402,13 +405,13 @@ func readBlockSizeBytes(name string) uint64 {
 }
 
 func probeTezsignDevice(path string) (bool, string) {
-	disk, _, _, appPartition, err := loadImage(path, diskfs.ReadOnly)
+	disk, _, _, _, err := loadImage(path, diskfs.ReadOnly)
 	if err != nil {
 		return false, err.Error()
 	}
 	defer disk.Close()
 
-	ok, err := checkTezsignMarker(disk, appPartition)
+	ok, err := checkTezsignMarker(disk)
 	switch {
 	case err != nil:
 		return false, "marker check failed"
@@ -419,14 +422,17 @@ func probeTezsignDevice(path string) (bool, string) {
 	}
 }
 
-func checkTezsignMarker(disk *disk.Disk, appPartition part.Partition) (bool, error) {
+func checkTezsignMarker(disk *disk.Disk) (bool, error) {
 	table, err := disk.GetPartitionTable()
 	if err != nil {
 		return false, err
 	}
+	if !hasExpectedPartitionCount(table) {
+		return false, nil
+	}
 	hasApp := false
 	hasData := false
-	for idx, _ := range table.GetPartitions() {
+	for idx := range table.GetPartitions() {
 		fs, err := disk.GetFilesystem(idx + 1)
 		if err == nil {
 			label := strings.TrimSpace(fs.Label())
@@ -441,6 +447,23 @@ func checkTezsignMarker(disk *disk.Disk, appPartition part.Partition) (bool, err
 		}
 	}
 	return hasApp && hasData, nil
+}
+
+func hasExpectedPartitionCount(t partition.Table) bool {
+	switch tt := t.(type) {
+	case *gpt.Table:
+		return len(tt.Partitions) >= 3
+	case *mbr.Table:
+		nonZero := 0
+		for _, p := range tt.Partitions {
+			if p != nil && p.Size > 0 {
+				nonZero++
+			}
+		}
+		return nonZero == 4
+	default:
+		return false
+	}
 }
 
 func loadImage(path string, mode diskfs.OpenModeOption) (*disk.Disk, part.Partition, part.Partition, part.Partition, error) {
@@ -467,6 +490,24 @@ func loadImage(path string, mode diskfs.OpenModeOption) (*disk.Disk, part.Partit
 	}
 
 	return disk, bootPartition, rootfsPartition, appPartition, nil
+}
+
+func filesystemForPartition(d *disk.Disk, p part.Partition) (filesystem.FileSystem, error) {
+	table, err := d.GetPartitionTable()
+	if err != nil {
+		return nil, err
+	}
+	parts := table.GetPartitions()
+	for idx, part := range parts {
+		if part == p {
+			return d.GetFilesystem(idx + 1)
+		}
+		// fallback to matching start/size when pointer comparison fails
+		if part != nil && p != nil && part.GetStart() == p.GetStart() && part.GetSize() == p.GetSize() {
+			return d.GetFilesystem(idx + 1)
+		}
+	}
+	return nil, errors.New("partition not found for filesystem lookup")
 }
 
 type countingReader struct {
@@ -549,35 +590,7 @@ func maybeDecompressSource(path string, logger *slog.Logger) (string, func(), er
 	return tmpFile.Name(), cleanup, nil
 }
 
-func detectDeviceFlavor(devicePath string) (string, error) {
-	f, err := os.Open(devicePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open device %s: %w", devicePath, err)
-	}
-	defer f.Close()
-
-	d, err := diskfs.OpenBackend(file.New(f, false), diskfs.WithOpenMode(diskfs.ReadOnly), diskfs.WithSectorSize(diskfs.SectorSizeDefault))
-	if err != nil {
-		return "", fmt.Errorf("failed to open disk backend for %s: %w", devicePath, err)
-	}
-	defer d.Close()
-
-	table, err := d.GetPartitionTable()
-	if err != nil {
-		return "", fmt.Errorf("failed to read partition table for %s: %w", devicePath, err)
-	}
-
-	switch table.(type) {
-	case *gpt.Table:
-		return "radxa_zero3.img.xz", nil
-	case *mbr.Table:
-		return "raspberry_pi.img.xz", nil
-	default:
-		return "", errors.New("unknown partition table type")
-	}
-}
-
-func downloadWithProgress(url string, logger *slog.Logger) (string, func(), error) {
+func downloadWithProgress(url string) (string, func(), error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to download image: %w", err)
@@ -634,6 +647,99 @@ func downloadWithProgress(url string, logger *slog.Logger) (string, func(), erro
 	return tmpFile.Name(), cleanup, nil
 }
 
+var validFlavours = map[string]bool{
+	"raspberry_pi":     true,
+	"raspberry_pi.dev": true,
+	"radxa_zero3":      true,
+	"radxa_zero3.dev":  true,
+}
+
+func deviceFlavour(devicePath string) (string, error) {
+	d, _, _, appPartition, err := loadImage(devicePath, diskfs.ReadOnly)
+	if err != nil {
+		return "", err
+	}
+	defer d.Close()
+
+	fs, err := filesystemForPartition(d, appPartition)
+	if err != nil {
+		return "", err
+	}
+
+	flavour, err := readImageFlavour(fs)
+	if err != nil {
+		return "", err
+	}
+	if flavour != "" {
+		return flavour, nil
+	}
+
+	tbl, err := d.GetPartitionTable()
+	if err != nil {
+		return "", err
+	}
+
+	fallback := flavourFromTable(tbl)
+	if fallback == "" {
+		return "", errors.New("unable to determine image flavour")
+	}
+	return fallback, nil
+}
+
+func flavourFromTable(t partition.Table) string {
+	switch t.(type) {
+	case *gpt.Table:
+		return "radxa_zero3"
+	case *mbr.Table:
+		return "raspberry_pi"
+	default:
+		return ""
+	}
+}
+
+func readImageFlavour(fs filesystem.FileSystem) (string, error) {
+	f, err := fs.OpenFile("/.image-flavour", os.O_RDONLY)
+	if err != nil {
+		// Some filesystems return a custom error string rather than os.ErrNotExist; treat any failure as "missing".
+		return "", nil
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	flavour := strings.TrimSpace(string(data))
+	if !validFlavours[flavour] {
+		return "", nil
+	}
+	return flavour, nil
+}
+
+func ensureImageFlavour(fs filesystem.FileSystem, fallback string, logger *slog.Logger) (string, error) {
+	flavour, err := readImageFlavour(fs)
+	if err != nil {
+		return "", err
+	}
+	if flavour != "" {
+		return flavour, nil
+	}
+	if fallback == "" {
+		return "", errors.New("unable to determine image flavour")
+	}
+
+	if tmp, err := fs.OpenFile("/.image-flavour", os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err == nil {
+		if _, err := tmp.Write([]byte(fallback)); err != nil {
+			logger.Debug("Failed to write /.image-flavour; continuing", "error", err)
+		}
+		tmp.Close()
+		_ = fs.Chmod("/.image-flavour", 0444)
+	} else {
+		logger.Debug("Failed to persist /.image-flavour; continuing", "error", err)
+	}
+	return fallback, nil
+}
+
 func copyPartitionData(srcDisk *disk.Disk, srcPartition part.Partition, dstDisk *disk.Disk, dstPartition part.Partition, logger *slog.Logger) error {
 	pr, pw := io.Pipe()
 	writableDst, err := dstDisk.Backend.Writable()
@@ -688,19 +794,13 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 	}
 	defer cleanup()
 
-	sourceImg, sourceBootPartition, sourceRootfsPartition, sourceAppPartition, err := loadImage(sourcePath, diskfs.ReadOnly)
-	if err != nil {
-		return fmt.Errorf("failed to load source image: %w", err)
-	}
-	defer sourceImg.Close()
-
 	dstImg, destinationBootPartition, destinationRootfsPartition, destinationAppPartition, err := loadImage(destination, diskfs.ReadWriteExclusive)
 	if err != nil {
 		return fmt.Errorf("failed to load destination image: %w", err)
 	}
 	defer dstImg.Close()
 
-	if ok, err := checkTezsignMarker(dstImg, destinationAppPartition); err != nil {
+	if ok, err := checkTezsignMarker(dstImg); err != nil {
 		logger.Debug("Skipping marker check", "error", err)
 	} else if !ok {
 		logger.Debug("Destination missing /tezsign marker; proceeding and will overwrite app partition")
@@ -708,6 +808,12 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 
 	switch kind {
 	case UpdateKindFull:
+		sourceImg, sourceBootPartition, sourceRootfsPartition, sourceAppPartition, err := loadImage(sourcePath, diskfs.ReadOnly)
+		if err != nil {
+			return fmt.Errorf("failed to load source image: %w", err)
+		}
+		defer sourceImg.Close()
+
 		if (sourceBootPartition == nil || destinationBootPartition == nil) && (sourceBootPartition != destinationBootPartition) {
 			return errors.New("boot partition missing in source image or destination device, cannot proceed with full update")
 		}
@@ -740,12 +846,139 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 			return fmt.Errorf("failed to update app partition: %w", err)
 		}
 	case UpdateKindAppOnly:
-		logger.Info("Updating app partition...")
-		if err = copyPartitionData(sourceImg, sourceAppPartition, dstImg, destinationAppPartition, logger); err != nil {
-			return fmt.Errorf("failed to update app partition: %w", err)
-		}
+		return errors.New("app-only updates require a gadget binary, not an image")
 	default:
 		return fmt.Errorf("unsupported update kind: %s", kind)
+	}
+
+	return nil
+}
+
+func performAppBinaryUpdate(binaryPath, destination string, logger *slog.Logger) error {
+	logger.Info("Starting TezSign app-only update", "source", binaryPath, "destination", destination)
+
+	dstImg, _, _, destinationAppPartition, err := loadImage(destination, diskfs.ReadWriteExclusive)
+	if err != nil {
+		return fmt.Errorf("failed to load destination image: %w", err)
+	}
+	defer dstImg.Close()
+
+	if ok, err := checkTezsignMarker(dstImg); err != nil {
+		return fmt.Errorf("marker check failed: %w", err)
+	} else if !ok {
+		return errors.New("destination does not match TezSign layout; aborting")
+	}
+
+	fs, err := filesystemForPartition(dstImg, destinationAppPartition)
+	if err != nil {
+		return fmt.Errorf("failed to open app filesystem: %w", err)
+	}
+
+	table, err := dstImg.GetPartitionTable()
+	if err != nil {
+		return fmt.Errorf("failed to read partition table: %w", err)
+	}
+
+	currentFlavour, _ := readImageFlavour(fs)
+	fallback := flavourFromTable(table)
+	if currentFlavour != "" {
+		fallback = currentFlavour
+	}
+	flavour, err := ensureImageFlavour(fs, fallback, logger)
+	if err != nil {
+		return fmt.Errorf("failed to ensure image flavour: %w", err)
+	}
+	logger.Info("Using image flavour", "flavour", flavour)
+
+	in, err := os.Open(binaryPath)
+	if err != nil {
+		return fmt.Errorf("failed to open gadget binary: %w", err)
+	}
+	defer in.Close()
+
+	writeBinary := func() error {
+		out, err := fs.OpenFile("/tezsign", os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+		if err != nil {
+			return fmt.Errorf("failed to open /tezsign on destination: %w", err)
+		}
+
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return fmt.Errorf("failed to write gadget binary: %w", err)
+		}
+		out.Close()
+
+		// Best-effort permission set; ignore failures on read-only fs.
+		_ = fs.Chmod("/tezsign", 0755)
+
+		// Verify we can read back the binary (basic assurance write succeeded).
+		verify, err := fs.OpenFile("/tezsign", os.O_RDONLY)
+		if err != nil {
+			return fmt.Errorf("failed to verify /tezsign after write: %w", err)
+		}
+		if _, err := io.Copy(io.Discard, verify); err != nil {
+			verify.Close()
+			return fmt.Errorf("failed to read back /tezsign after write: %w", err)
+		}
+		verify.Close()
+		return nil
+	}
+
+	if err := writeBinary(); err != nil {
+		logger.Warn("Direct write via go-diskfs failed, retrying via mount", "error", err)
+		if err := writeAppViaMount(binaryPath, flavour, logger); err != nil {
+			return fmt.Errorf("failed to write gadget binary (fallback mount): %w", err)
+		}
+	}
+
+	return nil
+}
+
+func writeAppViaMount(binaryPath, flavour string, logger *slog.Logger) error {
+	appDev, err := filepath.EvalSymlinks("/dev/disk/by-label/app")
+	if err != nil {
+		return fmt.Errorf("failed to resolve /dev/disk/by-label/app: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "tezsign_app_mount_")
+	if err != nil {
+		return fmt.Errorf("failed to create temp mount dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	mountCmd := exec.Command("mount", "-o", "rw", appDev, tmpDir)
+	if out, err := mountCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to mount app partition (%s): %v: %s", appDev, err, string(out))
+	}
+	defer exec.Command("umount", tmpDir).Run()
+
+	dstPath := filepath.Join(tmpDir, "tezsign")
+	src, err := os.Open(binaryPath)
+	if err != nil {
+		return fmt.Errorf("failed to open gadget binary: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to open %s for writing: %w", dstPath, err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return fmt.Errorf("failed to write gadget binary via mount: %w", err)
+	}
+	dst.Close()
+	_ = os.Chmod(dstPath, 0755)
+
+	flavourPath := filepath.Join(tmpDir, ".image-flavour")
+	if _, err := os.Stat(flavourPath); os.IsNotExist(err) && flavour != "" {
+		if err := os.WriteFile(flavourPath, []byte(flavour), 0444); err != nil {
+			logger.Debug("Failed to persist .image-flavour via mount; continuing", "error", err)
+		}
+	}
+
+	if out, err := exec.Command("sync").CombinedOutput(); err != nil {
+		logger.Debug("sync failed after mount write", "error", err, "output", string(out))
 	}
 
 	return nil
@@ -755,6 +988,7 @@ func main() {
 	logger := slog.Default()
 
 	var source string
+	var appBinary string
 	var sourceProvided bool
 	if len(os.Args) >= 2 {
 		source = os.Args[1]
@@ -775,8 +1009,20 @@ func main() {
 			}
 		}
 
-		if err := performUpdate(source, destination, kind, logger); err != nil {
-			logger.Error("Update failed", "error", err)
+		switch kind {
+		case UpdateKindFull:
+			if err := performUpdate(source, destination, kind, logger); err != nil {
+				logger.Error("Update failed", "error", err)
+				os.Exit(1)
+			}
+		case UpdateKindAppOnly:
+			appBinary = source
+			if err := performAppBinaryUpdate(appBinary, destination, logger); err != nil {
+				logger.Error("Update failed", "error", err)
+				os.Exit(1)
+			}
+		default:
+			logger.Error("Invalid update kind. Valid options are: full, app")
 			os.Exit(1)
 		}
 
@@ -797,30 +1043,63 @@ func main() {
 	}
 
 	if !sourceProvided {
-		imageName, err := detectDeviceFlavor(selectedDevice.Path)
-		if err != nil {
-			logger.Error("Failed to detect device flavor", "error", err)
+		switch kind {
+		case UpdateKindFull:
+			flavour, err := deviceFlavour(selectedDevice.Path)
+			if err != nil {
+				logger.Error("Failed to detect device flavor", "error", err)
+				os.Exit(1)
+			}
+			url := fmt.Sprintf("%s%s.img.xz", constants.LatestReleaseURL, flavour)
+			downloaded, cleanupFn, err := downloadWithProgress(url)
+			if err != nil {
+				logger.Error("Failed to download image", "error", err)
+				os.Exit(1)
+			}
+			defer cleanupFn()
+			source = downloaded
+		case UpdateKindAppOnly:
+			url := fmt.Sprintf("%s%s", constants.LatestReleaseURL, constants.AppBinaryName)
+			downloaded, cleanupFn, err := downloadWithProgress(url)
+			if err != nil {
+				logger.Error("Failed to download gadget binary", "error", err)
+				os.Exit(1)
+			}
+			defer cleanupFn()
+			appBinary = downloaded
+		default:
+			logger.Error("Unsupported update kind", "kind", kind)
 			os.Exit(1)
 		}
-		url := fmt.Sprintf("%s%s", constants.LatestReleaseURL, imageName)
-		downloaded, cleanup, err := downloadWithProgress(url, logger)
-		if err != nil {
-			logger.Error("Failed to download image", "error", err)
-			os.Exit(1)
-		}
-		defer cleanup()
-		source = downloaded
 	}
 
-	if _, err := os.Stat(source); err != nil {
-		logger.Error("Invalid source image", "error", err)
-		os.Exit(1)
+	if kind == UpdateKindFull {
+		if _, err := os.Stat(source); err != nil {
+			logger.Error("Invalid source image", "error", err)
+			os.Exit(1)
+		}
+	} else if kind == UpdateKindAppOnly {
+		if _, err := os.Stat(appBinary); err != nil {
+			logger.Error("Invalid gadget binary", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	fmt.Printf("Updating %s with a %s update...\n\n", selectedDevice.Path, string(kind))
 
-	if err := performUpdate(source, selectedDevice.Path, kind, logger); err != nil {
-		logger.Error("Update failed", "error", err)
+	switch kind {
+	case UpdateKindFull:
+		if err := performUpdate(source, selectedDevice.Path, kind, logger); err != nil {
+			logger.Error("Update failed", "error", err)
+			os.Exit(1)
+		}
+	case UpdateKindAppOnly:
+		if err := performAppBinaryUpdate(appBinary, selectedDevice.Path, logger); err != nil {
+			logger.Error("Update failed", "error", err)
+			os.Exit(1)
+		}
+	default:
+		logger.Error("Unsupported update kind", "kind", kind)
 		os.Exit(1)
 	}
 
