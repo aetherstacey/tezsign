@@ -573,6 +573,10 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 func performAppBinaryUpdate(binaryPath, destination string, logger *slog.Logger) error {
 	logger.Info("Starting TezSign app-only update", "source", binaryPath, "destination", destination)
 
+	if err := ensureMountAvailable(); err != nil {
+		return err
+	}
+
 	dstImg, _, _, destinationAppPartition, err := loadImage(destination, diskfs.ReadWriteExclusive)
 	if err != nil {
 		return fmt.Errorf("failed to load destination image: %w", err)
@@ -667,6 +671,19 @@ func writeAppViaMount(binaryPath, flavour string, logger *slog.Logger) error {
 		logger.Debug("sync failed after mount write", "error", err, "output", string(out))
 	}
 
+	return nil
+}
+
+func ensureMountAvailable() error {
+	if _, err := exec.LookPath("mount"); err != nil {
+		return fmt.Errorf("mount binary not found: %w", err)
+	}
+	if _, err := exec.LookPath("umount"); err != nil {
+		return fmt.Errorf("umount binary not found: %w", err)
+	}
+	if _, err := os.Stat("/dev/disk/by-label/app"); err != nil {
+		return fmt.Errorf("app partition label not found: %w", err)
+	}
 	return nil
 }
 
