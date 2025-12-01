@@ -92,22 +92,11 @@ func performAppBinaryUpdate(binaryPath, destination string, logger *slog.Logger)
 }
 
 func writeAppViaMount(binaryPath, flavour string, logger *slog.Logger) error {
-	appDev, err := filepath.EvalSymlinks("/dev/disk/by-label/app")
+	tmpDir, cleanup, err := mountAppPartition(true)
 	if err != nil {
-		return fmt.Errorf("failed to resolve /dev/disk/by-label/app: %w", err)
+		return err
 	}
-
-	tmpDir, err := os.MkdirTemp("", "tezsign_app_mount_")
-	if err != nil {
-		return fmt.Errorf("failed to create temp mount dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	mountCmd := exec.Command("mount", "-o", "rw", appDev, tmpDir)
-	if out, err := mountCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to mount app partition (%s): %v: %s", appDev, err, string(out))
-	}
-	defer exec.Command("umount", tmpDir).Run()
+	defer cleanup()
 
 	dstPath := filepath.Join(tmpDir, "tezsign")
 	src, err := os.Open(binaryPath)

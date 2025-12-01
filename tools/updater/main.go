@@ -17,6 +17,7 @@ import (
 	"github.com/diskfs/go-diskfs/partition"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"github.com/diskfs/go-diskfs/partition/mbr"
+	"github.com/tez-capital/tezsign/logging"
 	"github.com/tez-capital/tezsign/tools/constants"
 )
 
@@ -28,7 +29,7 @@ const (
 )
 
 func main() {
-	logger := slog.Default()
+	logger, _ := logging.NewFromEnv()
 
 	var source string
 	var appBinary string

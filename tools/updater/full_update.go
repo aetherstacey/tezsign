@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -177,6 +178,7 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 
 	switch kind {
 	case UpdateKindFull:
+		existingTezsignID := backupTezsignID(dstImg, destinationAppPartition, logger)
 		sourceImg, sourceBootPartition, sourceRootfsPartition, sourceAppPartition, err := loadImage(sourcePath, diskfs.ReadOnly)
 		if err != nil {
 			return fmt.Errorf("failed to load source image: %w", err)
@@ -213,6 +215,11 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 		logger.Info("Updating app partition...")
 		if err = copyPartitionData(sourceImg, sourceAppPartition, dstImg, destinationAppPartition, "app partition", logger); err != nil {
 			return fmt.Errorf("failed to update app partition: %w", err)
+		}
+		if existingTezsignID != "" {
+			if err := restoreTezsignID(existingTezsignID, destination, dstImg, destinationAppPartition, logger); err != nil {
+				return fmt.Errorf("failed to restore tezsign_id: %w", err)
+			}
 		}
 	case UpdateKindAppOnly:
 		return errors.New("app-only updates require a gadget binary, not an image")
@@ -283,4 +290,135 @@ func readImageFlavour(fs filesystem.FileSystem) (string, error) {
 		return "", nil
 	}
 	return flavour, nil
+}
+
+func backupTezsignID(d *disk.Disk, appPartition part.Partition, logger *slog.Logger) string {
+	fs, err := filesystemForPartition(d, appPartition)
+	if err != nil {
+		logger.Debug("Failed to open app filesystem for tezsign_id backup", "error", err)
+		return ""
+	}
+
+	f, err := fs.OpenFile("/tezsign_id", os.O_RDONLY)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			logger.Debug("Failed to read tezsign_id from app partition", "error", err)
+		}
+		return ""
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		logger.Debug("Failed to read tezsign_id contents", "error", err)
+		return ""
+	}
+
+	id := strings.TrimSpace(string(data))
+	if id != "" {
+		logger.Debug("Preserving existing", "tezsign_id", id)
+	}
+	return id
+}
+
+func restoreTezsignID(id, destination string, d *disk.Disk, appPartition part.Partition, logger *slog.Logger) error {
+	if id == "" {
+		return nil
+	}
+
+	tbl, err := d.GetPartitionTable()
+	if err != nil {
+		return fmt.Errorf("failed to read partition table: %w", err)
+	}
+
+	idx, err := partitionIndex(tbl, appPartition)
+	if err != nil {
+		logger.Error("Unable to locate app partition index for tezsign_id restore", "error", err)
+		return fmt.Errorf("failed to locate app partition index: %w", err)
+	}
+
+	logger.Debug("Restoring tezsign_id via mount", "partition_index", idx)
+	return writeTezsignIDViaMount(id, destination, idx, logger)
+}
+
+func writeTezsignIDViaMount(id, destination string, appPartitionIndex int, logger *slog.Logger) error {
+	partDevice := partitionDevicePath(destination, appPartitionIndex)
+	resolvedPart, _ := filepath.EvalSymlinks(partDevice)
+
+	tmpDir := ""
+	cleanup := func() {}
+
+	if mounts, err := os.ReadFile("/proc/mounts"); err == nil {
+		for _, line := range strings.Split(string(mounts), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 4 {
+				continue
+			}
+			dev := fields[0]
+			mountPoint := fields[1]
+			opts := fields[3]
+
+			resolvedDev, _ := filepath.EvalSymlinks(dev)
+			if dev == partDevice || resolvedDev == resolvedPart {
+				logger.Debug("Reusing existing mount for app partition", "mount_point", mountPoint, "options", opts, "device", dev)
+				if strings.Contains(opts, "ro") {
+					logger.Debug("Existing app mount is read-only; remounting rw", "mount_point", mountPoint)
+					if out, err := exec.Command("umount", mountPoint).CombinedOutput(); err != nil {
+						return fmt.Errorf("failed to unmount read-only app partition %s: %v: %s", mountPoint, err, string(out))
+					}
+				} else {
+					tmpDir = mountPoint
+					break
+				}
+			}
+		}
+	}
+
+	if tmpDir == "" {
+		mountDir, mountCleanup, err := mountSpecificPartition(destination, appPartitionIndex, true)
+		if err != nil {
+			logger.Error("Failed to mount app partition for tezsign_id restore", "error", err, "destination", destination, "partition_index", appPartitionIndex, "device", partDevice)
+			return err
+		}
+		tmpDir = mountDir
+		cleanup = mountCleanup
+	}
+	defer cleanup()
+
+	if mounts, err := os.ReadFile("/proc/mounts"); err == nil {
+		for _, line := range strings.Split(string(mounts), "\n") {
+			if strings.Contains(line, tmpDir) {
+				logger.Debug("Mount entry for app partition", "entry", line)
+				break
+			}
+		}
+	}
+
+	idPath := fmt.Sprintf("%s/tezsign_id", tmpDir)
+	if err := os.WriteFile(idPath, []byte(id+"\n"), 0644); err != nil {
+		logger.Error("Failed to write tezsign_id to mounted app partition", "error", err, "path", idPath)
+		return err
+	}
+	if err := os.Chmod(idPath, 0400); err != nil {
+		logger.Debug("Failed to chmod tezsign_id", "error", err, "path", idPath)
+	}
+
+	if out, err := exec.Command("ls", "-l", tmpDir).CombinedOutput(); err != nil {
+		logger.Debug("Failed to list app mount after writing tezsign_id", "error", err, "output", string(out))
+	} else {
+		logger.Debug("App mount contents after tezsign_id restore", "output", string(out))
+	}
+
+	if out, err := exec.Command("sync").CombinedOutput(); err != nil {
+		logger.Debug("sync failed after tezsign_id restore", "error", err, "output", string(out))
+	}
+
+	if data, err := os.ReadFile(idPath); err == nil {
+		logger.Debug("Read back tezsign_id after write", "value", strings.TrimSpace(string(data)))
+	} else {
+		logger.Debug("Failed to read back tezsign_id after write", "error", err)
+	}
+
+	logger.Debug("tezsign_id restored", "path", idPath)
+	return nil
 }
