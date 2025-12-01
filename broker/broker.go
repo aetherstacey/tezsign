@@ -158,13 +158,16 @@ func (b *Broker) writerLoop() <-chan struct{} {
 			case <-b.ctx.Done():
 				return
 			}
-			if _, err := b.w.WriteContext(b.ctx, data); err != nil {
-				if isRetryable(err) {
-					b.logger.Debug("write retryable error", slog.Any("err", err))
-					continue
+			for {
+				if _, err := b.w.WriteContext(b.ctx, data); err != nil {
+					if isRetryable(err) {
+						b.logger.Debug("write retryable error", slog.Any("err", err))
+						continue
+					}
+					b.logger.Error("write loop exit", slog.Any("err", err))
+					return
 				}
-				b.logger.Debug("write loop exit", slog.Any("err", err))
-				return
+				break
 			}
 		}
 	}()
@@ -270,6 +273,7 @@ func (b *Broker) writeFrame(ctx context.Context, msgType payloadType, id [16]byt
 
 	frame, err := newMessage(msgType, id, payload)
 	if err != nil {
+		b.logger.Error("failed to create message frame", slog.Any("error", err))
 		return err
 	}
 

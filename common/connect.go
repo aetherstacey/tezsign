@@ -370,7 +370,7 @@ func Connect(p ConnectParams) (*Session, error) {
 	}
 
 	// Build broker
-	br := broker.New(inEp, outEp,
+	br := broker.New(inEp, newLibusbWriter(outEp),
 		broker.WithLogger(l.With("component", "broker", "chan", map[Channel]string{ChanSign: "sign", ChanMgmt: "mgmt"}[p.Channel])),
 		broker.WithHandler(p.BrokerHandler),
 	)
