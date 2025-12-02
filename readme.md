@@ -11,7 +11,7 @@
 | **Avg Signature Time** | ~10ms | ~5ms | ~30ms |
 | **Security** | 🔒 **High** (Custom Wire Proto) | 🔒 **High** (Custom Image) | 🛡️ Medium |
 | **Power Loss Safe** | ✅ **Yes** | ✅ **Yes** | ⚠️ No |
-| **Boot Time** | ⏱️ 15s | 🚀 **5s** | ❓ Unknown |
+| **Boot Time** | ⏱️ 15s | 🚀 **5s** | ~1.5m |
 | **Multi-Device Support**| ✅ **Yes** | ❌ No | ❌ No |
 | **Multi-Baker Support** | ✅ **Yes** | ❌ No | ❌ No |
 | **Companion App** | Required | Optional | No |
