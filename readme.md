@@ -20,8 +20,10 @@
 | **Installation Size** | 💾 ~200MB | 📦 7MB | 🐘 1.95GB |
 | **License** | 📜 SSPL | ⛔ UNLICENSED | 📜 MIT |
 
-> **Note:** The comparison table above is accurate as of December 2, 2025. 
+> **Note:** The comparison table above is accurate as of December 2, 2025.
+
 > **Disclaimer:** The values for other signers in the comparison table are provided by their respective providers or users and have not been independently verified by us. If you notice any inaccuracies, please [let us know](https://github.com/tez-capital/tezsign/issues).
+
 > **\*** * Shipping & taxes may apply.
 >
 > **Note on Power Loss:** "Yes" indicates the device is hardened against corruption if power is suddenly cut.
