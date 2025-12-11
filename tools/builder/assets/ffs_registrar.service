@@ -10,8 +10,8 @@ Group=registrar
 Environment="BROKER_LOG=debug"
 ExecStart=/usr/local/bin/ffs_registrar
 RemainAfterExit=yes
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=1
 StandardOutput=journal+console
 StandardError=journal+console
 
