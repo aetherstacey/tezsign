@@ -4,7 +4,7 @@
 // 	protoc        v3.21.12
 // source: signer.proto
 
-package signer
+package signerpb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"

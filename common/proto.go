@@ -5,18 +5,18 @@ import (
 	"time"
 
 	"github.com/tez-capital/tezsign/broker"
-	"github.com/tez-capital/tezsign/keychain"
-	"github.com/tez-capital/tezsign/signer"
+	"github.com/tez-capital/tezsign/secure"
+	"github.com/tez-capital/tezsign/signerpb"
 	"google.golang.org/protobuf/proto"
 )
 
-func ReqUnlockKeys(b *broker.Broker, keys []string, pass []byte) ([]*signer.PerKeyResult, error) {
+func ReqUnlockKeys(b *broker.Broker, keys []string, pass []byte) ([]*signerpb.PerKeyResult, error) {
 	p := append([]byte(nil), pass...)
-	defer keychain.MemoryWipe(p)
+	defer secure.MemoryWipe(p)
 
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_Unlock{
-			Unlock: &signer.UnlockRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Unlock{
+			Unlock: &signerpb.UnlockRequest{
 				KeyIds:     keys,
 				Passphrase: p,
 			},
@@ -29,10 +29,10 @@ func ReqUnlockKeys(b *broker.Broker, keys []string, pass []byte) ([]*signer.PerK
 	return resp.GetUnlock().GetResults(), nil
 }
 
-func ReqLockKeys(b *broker.Broker, keys []string) ([]*signer.PerKeyResult, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_Lock{
-			Lock: &signer.LockRequest{
+func ReqLockKeys(b *broker.Broker, keys []string) ([]*signerpb.PerKeyResult, error) {
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Lock{
+			Lock: &signerpb.LockRequest{
 				KeyIds: keys,
 			},
 		},
@@ -44,10 +44,10 @@ func ReqLockKeys(b *broker.Broker, keys []string) ([]*signer.PerKeyResult, error
 	return resp.GetLock().GetResults(), nil
 }
 
-func ReqStatus(b *broker.Broker) (*signer.StatusResponse, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_Status{
-			Status: &signer.StatusRequest{},
+func ReqStatus(b *broker.Broker) (*signerpb.StatusResponse, error) {
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Status{
+			Status: &signerpb.StatusRequest{},
 		},
 	}, 3*time.Second)
 	if err != nil {
@@ -58,9 +58,9 @@ func ReqStatus(b *broker.Broker) (*signer.StatusResponse, error) {
 }
 
 func ReqSign(b *broker.Broker, tz4 string, rawMsg []byte) ([]byte, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_Sign{
-			Sign: &signer.SignRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Sign{
+			Sign: &signerpb.SignRequest{
 				Tz4:     tz4,
 				Message: rawMsg,
 			},
@@ -75,13 +75,13 @@ func ReqSign(b *broker.Broker, tz4 string, rawMsg []byte) ([]byte, error) {
 	return s.GetSignature(), nil
 }
 
-func ReqNewKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signer.NewKeyPerKeyResult, error) {
+func ReqNewKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signerpb.NewKeyPerKeyResult, error) {
 	p := append([]byte(nil), pass...)
-	defer keychain.MemoryWipe(p)
+	defer secure.MemoryWipe(p)
 
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_NewKeys{
-			NewKeys: &signer.NewKeysRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_NewKeys{
+			NewKeys: &signerpb.NewKeysRequest{
 				KeyIds:     keyIDs,
 				Passphrase: p,
 			},
@@ -93,13 +93,13 @@ func ReqNewKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signer.NewKe
 	return resp.GetNewKey().GetResults(), nil
 }
 
-func ReqDeleteKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signer.PerKeyResult, error) {
+func ReqDeleteKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signerpb.PerKeyResult, error) {
 	p := append([]byte(nil), pass...)
-	defer keychain.MemoryWipe(p)
+	defer secure.MemoryWipe(p)
 
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_DeleteKeys{
-			DeleteKeys: &signer.DeleteKeysRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_DeleteKeys{
+			DeleteKeys: &signerpb.DeleteKeysRequest{
 				KeyIds:     keyIDs,
 				Passphrase: p,
 			},
@@ -112,9 +112,9 @@ func ReqDeleteKeys(b *broker.Broker, keyIDs []string, pass []byte) ([]*signer.Pe
 }
 
 func ReqLogs(b *broker.Broker, limit int) ([]string, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_Logs{
-			Logs: &signer.LogsRequest{Limit: uint32(limit)},
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Logs{
+			Logs: &signerpb.LogsRequest{Limit: uint32(limit)},
 		},
 	}, 3*time.Second)
 	if err != nil {
@@ -125,11 +125,11 @@ func ReqLogs(b *broker.Broker, limit int) ([]string, error) {
 
 func ReqInitMaster(b *broker.Broker, deterministic bool, pass []byte) (bool, error) {
 	p := append([]byte(nil), pass...)
-	defer keychain.MemoryWipe(p)
+	defer secure.MemoryWipe(p)
 
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_InitMaster{
-			InitMaster: &signer.InitMasterRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_InitMaster{
+			InitMaster: &signerpb.InitMasterRequest{
 				Deterministic: deterministic,
 				Passphrase:    p,
 			},
@@ -141,9 +141,9 @@ func ReqInitMaster(b *broker.Broker, deterministic bool, pass []byte) (bool, err
 	return resp.GetOk().GetOk(), nil
 }
 
-func ReqInitInfo(b *broker.Broker) (*signer.InitInfoResponse, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_InitInfo{InitInfo: &signer.InitInfoRequest{}},
+func ReqInitInfo(b *broker.Broker) (*signerpb.InitInfoResponse, error) {
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_InitInfo{InitInfo: &signerpb.InitInfoRequest{}},
 	}, 3*time.Second)
 	if err != nil {
 		return nil, err
@@ -152,9 +152,9 @@ func ReqInitInfo(b *broker.Broker) (*signer.InitInfoResponse, error) {
 }
 
 func ReqSetLevel(b *broker.Broker, keyID string, level uint64) (bool, error) {
-	resp, err := doReq(b, &signer.Request{
-		Payload: &signer.Request_SetLevel{
-			SetLevel: &signer.SetLevelRequest{
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_SetLevel{
+			SetLevel: &signerpb.SetLevelRequest{
 				KeyId: keyID,
 				Level: level,
 			},
@@ -166,7 +166,7 @@ func ReqSetLevel(b *broker.Broker, keyID string, level uint64) (bool, error) {
 	return resp.GetOk().GetOk(), nil
 }
 
-func doReq(b *broker.Broker, req *signer.Request, timeout time.Duration) (*signer.Response, error) {
+func doReq(b *broker.Broker, req *signerpb.Request, timeout time.Duration) (*signerpb.Response, error) {
 	pb, err := proto.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -177,7 +177,7 @@ func doReq(b *broker.Broker, req *signer.Request, timeout time.Duration) (*signe
 	if err != nil {
 		return nil, err
 	}
-	var resp signer.Response
+	var resp signerpb.Response
 	if err := proto.Unmarshal(raw, &resp); err != nil {
 		return nil, err
 	}

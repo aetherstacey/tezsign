@@ -16,7 +16,8 @@ import (
 	"github.com/tez-capital/tezsign/broker"
 	"github.com/tez-capital/tezsign/keychain"
 	"github.com/tez-capital/tezsign/logging"
-	"github.com/tez-capital/tezsign/signer"
+	"github.com/tez-capital/tezsign/secure"
+	"github.com/tez-capital/tezsign/signerpb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -59,12 +60,12 @@ func main() {
 
 func handleSignAndStatus(base func(context.Context, []byte) ([]byte, error)) broker.Handler {
 	return func(ctx context.Context, payload []byte) ([]byte, error) {
-		var req signer.Request
+		var req signerpb.Request
 		if err := proto.Unmarshal(payload, &req); err != nil {
 			return marshalErr(1, fmt.Sprintf("bad protobuf: %v", err)), nil
 		}
 		switch req.Payload.(type) {
-		case *signer.Request_Sign, *signer.Request_Status:
+		case *signerpb.Request_Sign, *signerpb.Request_Status:
 			// allowed on IF0
 		default:
 			return marshalErr(98, "wrong interface: use management (IF1) for this request"), nil
@@ -76,12 +77,12 @@ func handleSignAndStatus(base func(context.Context, []byte) ([]byte, error)) bro
 
 func handleMgmtOnly(base func(context.Context, []byte) ([]byte, error)) broker.Handler {
 	return func(ctx context.Context, payload []byte) ([]byte, error) {
-		var req signer.Request
+		var req signerpb.Request
 		if err := proto.Unmarshal(payload, &req); err != nil {
 			return marshalErr(1, fmt.Sprintf("bad protobuf: %v", err)), nil
 		}
 		// reject Sign here
-		if _, isSign := req.Payload.(*signer.Request_Sign); isSign {
+		if _, isSign := req.Payload.(*signerpb.Request_Sign); isSign {
 			return marshalErr(1001, "wrong interface: use sign (IF0) for signing"), nil
 		}
 		return base(ctx, payload)
@@ -90,17 +91,17 @@ func handleMgmtOnly(base func(context.Context, []byte) ([]byte, error)) broker.H
 
 func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog.Logger) broker.Handler {
 	return func(ctx context.Context, payload []byte) ([]byte, error) {
-		var req signer.Request
+		var req signerpb.Request
 		if err := proto.Unmarshal(payload, &req); err != nil {
 			return marshalErr(1, fmt.Sprintf("bad protobuf: %v", err)), nil
 		}
 		defer wipeReq(&req)
-		defer keychain.MemoryWipe(payload)
+		defer secure.MemoryWipe(payload)
 
 		switch p := req.Payload.(type) {
-		case *signer.Request_Unlock:
+		case *signerpb.Request_Unlock:
 			pass := p.Unlock.GetPassphrase()
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			ids := p.Unlock.GetKeyIds()
 			if len(ids) == 0 {
@@ -120,9 +121,9 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 				return marshalErr(rpcUnlockThrottled, msg), nil
 			}
 
-			results := make([]*signer.PerKeyResult, 0, len(ids))
+			results := make([]*signerpb.PerKeyResult, 0, len(ids))
 			for _, id := range ids {
-				res := &signer.PerKeyResult{KeyId: id}
+				res := &signerpb.PerKeyResult{KeyId: id}
 				if err := kr.Unlock(id, pass); err != nil {
 					res.Ok = false
 					res.Error = err.Error()
@@ -136,21 +137,21 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			l.Debug("UNLOCK batch", "count", len(ids))
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_Unlock{
-					Unlock: &signer.UnlockResponse{Results: results},
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Unlock{
+					Unlock: &signerpb.UnlockResponse{Results: results},
 				},
 			})
 
-		case *signer.Request_Lock:
+		case *signerpb.Request_Lock:
 			ids := p.Lock.GetKeyIds()
 			if len(ids) == 0 {
 				return marshalErr(20, "lock: no key_ids provided"), nil
 			}
 
-			results := make([]*signer.PerKeyResult, 0, len(ids))
+			results := make([]*signerpb.PerKeyResult, 0, len(ids))
 			for _, id := range ids {
-				res := &signer.PerKeyResult{KeyId: id}
+				res := &signerpb.PerKeyResult{KeyId: id}
 				if err := kr.Lock(id); err != nil {
 					res.Ok = false
 					res.Error = err.Error()
@@ -164,22 +165,22 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			l.Debug("LOCK batch", "count", len(ids))
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_Lock{
-					Lock: &signer.LockResponse{Results: results},
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Lock{
+					Lock: &signerpb.LockResponse{Results: results},
 				},
 			})
 
-		case *signer.Request_Status:
+		case *signerpb.Request_Status:
 			st := kr.Status()
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_Status{
-					Status: &signer.StatusResponse{Keys: st},
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Status{
+					Status: &signerpb.StatusResponse{Keys: st},
 				},
 			})
 
-		case *signer.Request_Sign:
+		case *signerpb.Request_Sign:
 			tz4 := p.Sign.GetTz4()
 			sig, err := kr.SignAndUpdate(tz4, p.Sign.GetMessage())
 			if err != nil {
@@ -200,26 +201,26 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			l.Debug("SIGNED", "tz4", tz4)
 
-			result, err := proto.Marshal(&signer.Response{
-				Payload: &signer.Response_Sign{
-					Sign: &signer.SignResponse{Signature: sig},
+			result, err := proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Sign{
+					Sign: &signerpb.SignResponse{Signature: sig},
 				},
 			})
 
 			return result, err
 
-		case *signer.Request_NewKeys:
+		case *signerpb.Request_NewKeys:
 			pass := p.NewKeys.GetPassphrase()
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 			ids := p.NewKeys.GetKeyIds()
 			if len(ids) == 0 {
 				ids = []string{""}
 			}
 
-			results := make([]*signer.NewKeyPerKeyResult, 0, len(ids))
+			results := make([]*signerpb.NewKeyPerKeyResult, 0, len(ids))
 			for _, alias := range ids {
 				id, blPubkey, tz4, err := kr.CreateKey(alias, pass)
-				r := &signer.NewKeyPerKeyResult{
+				r := &signerpb.NewKeyPerKeyResult{
 					KeyId:    id,
 					BlPubkey: blPubkey,
 					Tz4:      tz4,
@@ -240,17 +241,17 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			l.Debug("NEW_KEY batch", "count", len(ids))
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_NewKey{
-					NewKey: &signer.NewKeysResponse{
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_NewKey{
+					NewKey: &signerpb.NewKeysResponse{
 						Results: results,
 					},
 				},
 			})
 
-		case *signer.Request_DeleteKeys:
+		case *signerpb.Request_DeleteKeys:
 			pass := p.DeleteKeys.GetPassphrase()
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 			ids := p.DeleteKeys.GetKeyIds()
 			if len(ids) == 0 {
 				return marshalErr(90, "delete_keys: no key_ids provided"), nil
@@ -273,9 +274,9 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 				return marshalErr(rpcDeleteBadPass, "delete_keys: invalid passphrase"), nil
 			}
 
-			results := make([]*signer.PerKeyResult, 0, len(ids))
+			results := make([]*signerpb.PerKeyResult, 0, len(ids))
 			for _, alias := range ids {
-				res := &signer.PerKeyResult{KeyId: alias}
+				res := &signerpb.PerKeyResult{KeyId: alias}
 				if err := kr.DeleteKey(alias); err != nil {
 					res.Ok = false
 					res.Error = err.Error()
@@ -289,15 +290,15 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			l.Debug("DELETE_KEY batch", "count", len(ids))
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_DeleteKeys{
-					DeleteKeys: &signer.DeleteKeysResponse{
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_DeleteKeys{
+					DeleteKeys: &signerpb.DeleteKeysResponse{
 						Results: results,
 					},
 				},
 			})
 
-		case *signer.Request_Logs:
+		case *signerpb.Request_Logs:
 			path := logging.CurrentFile()
 			if path == "" {
 				return marshalErr(50, "logs: file logging not enabled"), nil
@@ -309,16 +310,16 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 				return marshalErr(51, fmt.Sprintf("logs: %v", err)), nil
 			}
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_Logs{
-					Logs: &signer.LogsResponse{Lines: lines},
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Logs{
+					Logs: &signerpb.LogsResponse{Lines: lines},
 				},
 			})
 
-		case *signer.Request_InitMaster:
+		case *signerpb.Request_InitMaster:
 			det := p.InitMaster.GetDeterministic()
 			pass := p.InitMaster.GetPassphrase()
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			if len(pass) == 0 {
 				return marshalErr(60, "init_master: passphrase required"), nil
@@ -336,22 +337,22 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 
 			return marshalOK(true), nil
 
-		case *signer.Request_InitInfo:
+		case *signerpb.Request_InitInfo:
 			master, det, e := fs.InitInfo()
 			if e != nil {
 				return marshalErr(70, "init_info: "+e.Error()), nil
 			}
 
-			return proto.Marshal(&signer.Response{
-				Payload: &signer.Response_InitInfo{
-					InitInfo: &signer.InitInfoResponse{
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_InitInfo{
+					InitInfo: &signerpb.InitInfoResponse{
 						MasterPresent:        master,
 						DeterministicEnabled: det,
 					},
 				},
 			})
 
-		case *signer.Request_SetLevel:
+		case *signerpb.Request_SetLevel:
 			keyID := p.SetLevel.GetKeyId()
 			if err := kr.SetLevel(keyID, p.SetLevel.GetLevel()); err != nil {
 				return marshalErr(80, fmt.Sprintf("set_level for key=%s error: %v", keyID, err)), nil

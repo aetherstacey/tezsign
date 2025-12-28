@@ -19,8 +19,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/tez-capital/tezsign/broker"
 	"github.com/tez-capital/tezsign/common"
-	"github.com/tez-capital/tezsign/keychain"
-	"github.com/tez-capital/tezsign/signer"
+	"github.com/tez-capital/tezsign/secure"
+	"github.com/tez-capital/tezsign/signerpb"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 )
@@ -85,13 +85,13 @@ func cmdInit() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("init master: %w", err)
 			}
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			confirm, err := obtainPassword("Confirm master passphrase", false)
 			if err != nil {
 				return fmt.Errorf("init master: %w", err)
 			}
-			defer keychain.MemoryWipe(confirm)
+			defer secure.MemoryWipe(confirm)
 
 			if subtle.ConstantTimeCompare(pass, confirm) != 1 {
 				return fmt.Errorf("passphrases do not match")
@@ -162,7 +162,7 @@ func cmdRun() *cli.Command {
 			allowSet := make(map[string]struct{}, len(allow))
 
 			// Index status for quick lookups and verify unlocked
-			known := make(map[string]*signer.KeyStatus, len(st.GetKeys()))
+			known := make(map[string]*signerpb.KeyStatus, len(st.GetKeys()))
 			locked := []string{}
 			missing := []string{}
 			for _, k := range st.GetKeys() {
@@ -214,7 +214,7 @@ func cmdRun() *cli.Command {
 			}
 
 			// Start HTTP server with allow-list
-			app := buildFiberApp(getBroker, l, allowSet, cachedKeys)
+			app := buildFiberApp(getBroker, allowSet, cachedKeys)
 
 			httpErrCh := make(chan error, 1)
 			go func() {
@@ -312,7 +312,7 @@ func cmdNewKeys() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("new keys: %w", err)
 			}
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			keys := c.Args().Slice()
 
@@ -477,14 +477,14 @@ func cmdUnlockKeys() *cli.Command {
 				}
 				return fmt.Errorf("unlock keys: %w", err)
 			}
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			if len(keys) == 0 {
 				st, err := common.ReqStatus(b)
 				if err != nil {
 					return err
 				}
-				keys = lo.Map(st.GetKeys(), func(key *signer.KeyStatus, _ int) string {
+				keys = lo.Map(st.GetKeys(), func(key *signerpb.KeyStatus, _ int) string {
 					return key.GetKeyId()
 				})
 			}
@@ -566,7 +566,7 @@ func cmdLockKeys() *cli.Command {
 				if st == nil || len(st.GetKeys()) == 0 {
 					return nil
 				}
-				keys = lo.Map(st.GetKeys(), func(key *signer.KeyStatus, _ int) string {
+				keys = lo.Map(st.GetKeys(), func(key *signerpb.KeyStatus, _ int) string {
 					return key.GetKeyId()
 				})
 			}
@@ -648,7 +648,7 @@ func cmdDeleteKeys() *cli.Command {
 				}
 				return fmt.Errorf("delete keys: %w", err)
 			}
-			defer keychain.MemoryWipe(pass)
+			defer secure.MemoryWipe(pass)
 
 			res, err := common.ReqDeleteKeys(b, keys, pass)
 			if err != nil {

@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package signer;
-option go_package = "./signer;signer";
+option go_package = "./signerpb;signerpb";
 
 message PerKeyResult {
   string key_id = 1;

@@ -154,12 +154,6 @@ func EncodeBLPubkey(pubkeyBytes []byte) (string, error) {
 	}
 	return b58CheckEncode(pfxBLPubkey, pubkeyBytes), nil
 }
-func EncodeBLSignature(sigBytes []byte) (string, error) {
-	if len(sigBytes) != blst.BLST_P2_COMPRESS_BYTES {
-		return "", errSigNot96Bytes
-	}
-	return b58CheckEncode(pfxBLSignature, sigBytes), nil
-}
 
 // Base58Check(prefix || payload || doubleSHA256(prefix||payload)[0:4])
 //

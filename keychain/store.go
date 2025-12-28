@@ -13,8 +13,8 @@ import (
 	"sort"
 	"sync"
 	"time"
-	unsafe "unsafe"
 
+	"github.com/tez-capital/tezsign/secure"
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/protobuf/proto"
 )
@@ -237,21 +237,6 @@ func (fs *FileStore) InitInfo() (masterPresent, deterministic bool, err error) {
 	return masterPresent, deterministic, nil
 }
 
-//go:linkname memclrNoHeapPointers runtime.memclrNoHeapPointers
-//go:noescape
-func memclrNoHeapPointers(ptr unsafe.Pointer, len uintptr)
-
-// MemoryWipe is the fastest, most secure way to zero a byte slice.
-// It uses the Go runtime's internal, highly-optimized, non-optimizable
-// memory clear function.
-func MemoryWipe(b []byte) {
-	if len(b) == 0 {
-		return
-	}
-
-	memclrNoHeapPointers(unsafe.Pointer(&b[0]), uintptr(len(b)))
-}
-
 func (fs *FileStore) deriveKEK(masterPassword []byte) ([]byte, *masterFile, error) {
 	masterPath := filepath.Join(fs.base, masterFileName)
 	var mf masterFile
@@ -316,11 +301,11 @@ func (fs *FileStore) createKey(id string, masterPassword []byte, skLE32 []byte, 
 	if err != nil {
 		return err
 	}
-	defer MemoryWipe(kek)
+	defer secure.MemoryWipe(kek)
 
 	// random DEK
 	dek := randBytes(32)
-	defer MemoryWipe(dek)
+	defer secure.MemoryWipe(dek)
 
 	// wrap DEK with KEK
 	wrapNonce := randBytes(12)
@@ -390,7 +375,7 @@ func (fs *FileStore) unlock(id string, masterPassword []byte) (dek []byte, encSe
 	if err != nil {
 		return nil, nil, nil, "", "", err
 	}
-	defer MemoryWipe(kek)
+	defer secure.MemoryWipe(kek)
 
 	gcmKEK, err := newAESGCM(kek)
 	if err != nil {
@@ -473,7 +458,7 @@ func (fs *FileStore) WriteSeed(masterPassword []byte, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	defer MemoryWipe(kek)
+	defer secure.MemoryWipe(kek)
 
 	seed := randBytes(32)
 
@@ -530,7 +515,7 @@ func (fs *FileStore) readSeed(masterPassword []byte) (bool, []byte, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	defer MemoryWipe(kek)
+	defer secure.MemoryWipe(kek)
 
 	gcm, err := newAESGCM(kek)
 	if err != nil {

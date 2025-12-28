@@ -10,7 +10,9 @@ import (
 	"sync/atomic"
 
 	"github.com/tez-capital/tezsign/logging"
+	"github.com/tez-capital/tezsign/secure"
 	"github.com/tez-capital/tezsign/signer"
+	"github.com/tez-capital/tezsign/signerpb"
 )
 
 type SIGN_KIND byte
@@ -112,7 +114,7 @@ func (kr *KeyRing) CreateKey(wanted string, masterPassword []byte) (id, blPubkey
 
 	// --- Decide deterministic vs random ---
 	enabled, seed, seedErr := kr.store.readSeed(masterPassword)
-	defer MemoryWipe(seed)
+	defer secure.MemoryWipe(seed)
 	if seedErr != nil {
 		return "", "", "", seedErr
 	}
@@ -179,7 +181,7 @@ func (kr *KeyRing) CreateKey(wanted string, masterPassword []byte) (id, blPubkey
 		// persist (runs Argon2id exactly once)
 		func() {
 			skLE := secretKey.ToLEndian()
-			defer MemoryWipe(skLE)
+			defer secure.MemoryWipe(skLE)
 
 			pErr := kr.store.createKey(candidate, masterPassword, skLE, blPubkey, tz4, popBLsig)
 			if pErr == nil {
@@ -240,7 +242,7 @@ func (kr *KeyRing) Unlock(id string, masterPassword []byte) error {
 
 	// (optional) sanity
 	if len(dek) != 32 {
-		MemoryWipe(dek)
+		secure.MemoryWipe(dek)
 		return fmt.Errorf("load state: bad DEK length %d", len(dek))
 	}
 
@@ -250,7 +252,7 @@ func (kr *KeyRing) Unlock(id string, masterPassword []byte) error {
 		if errors.Is(err, ErrKeyStateCorrupted) {
 			key.stateCorrupted = true
 		}
-		MemoryWipe(dek)
+		secure.MemoryWipe(dek)
 		return fmt.Errorf("load state: %w", err)
 	}
 	key.stateCorrupted = corrupted
@@ -261,7 +263,7 @@ func (kr *KeyRing) Unlock(id string, masterPassword []byte) error {
 
 	// 4) attach sensitive material only after successful state read
 	if key.dek != nil {
-		MemoryWipe(key.dek)
+		secure.MemoryWipe(key.dek)
 	}
 	key.dek, key.encSecret, key.dataNonce = dek, enc, nonce
 	key.blPubkey, key.tz4 = blPubkey, tz4
@@ -285,7 +287,7 @@ func (kr *KeyRing) Lock(id string) error {
 
 	key.mu.Lock()
 	if key.dek != nil {
-		MemoryWipe(key.dek)
+		secure.MemoryWipe(key.dek)
 		key.dek = nil
 	}
 	key.encSecret = nil
@@ -310,7 +312,7 @@ func (kr *KeyRing) DeleteKey(wanted string) error {
 		if key, _ := v.(*gKey); key != nil {
 			key.mu.Lock()
 			if key.dek != nil {
-				MemoryWipe(key.dek)
+				secure.MemoryWipe(key.dek)
 				key.dek = nil
 			}
 			key.encSecret = nil
@@ -327,20 +329,20 @@ func (kr *KeyRing) VerifyMasterPassword(masterPassword []byte) error {
 	if err != nil {
 		return err
 	}
-	MemoryWipe(seed)
+	secure.MemoryWipe(seed)
 	return nil
 }
 
-func (kr *KeyRing) Status() []*signer.KeyStatus {
+func (kr *KeyRing) Status() []*signerpb.KeyStatus {
 	ids, err := kr.store.list()
 	if err != nil {
 		kr.log.Error("status list", "err", err)
 		return nil
 	}
 
-	out := make([]*signer.KeyStatus, 0, len(ids))
+	out := make([]*signerpb.KeyStatus, 0, len(ids))
 	for _, id := range ids {
-		ks := &signer.KeyStatus{KeyId: id}
+		ks := &signerpb.KeyStatus{KeyId: id}
 
 		// Always read identity + PoP from disk
 		meta, mErr := kr.store.readKeyMeta(id)
@@ -348,7 +350,7 @@ func (kr *KeyRing) Status() []*signer.KeyStatus {
 			kr.log.Error("status: read meta", "key", id, "err", mErr)
 		}
 
-		ks.LockState = signer.LockState_LOCKED
+		ks.LockState = signerpb.LockState_LOCKED
 		ks.Tz4 = meta.TZ4
 		ks.BlPubkey = meta.BLPubkey
 		ks.Pop = meta.Pop
@@ -385,7 +387,7 @@ func (kr *KeyRing) Status() []*signer.KeyStatus {
 			if showCorrupted {
 				ks.StateCorrupted = true
 			} else if isUnlocked {
-				ks.LockState = signer.LockState_UNLOCKED
+				ks.LockState = signerpb.LockState_UNLOCKED
 				block := key.watermark[BLOCK]
 				preattestation := key.watermark[PREATTESTATION]
 				attestation := key.watermark[ATTESTATION]
@@ -484,19 +486,19 @@ func (kr *KeyRing) SignAndUpdate(tz4 string, raw []byte) (sig []byte, err error)
 		return nil, fmt.Errorf("corrupted key (secret)")
 	}
 	if len(le) != 32 {
-		MemoryWipe(le)
+		secure.MemoryWipe(le)
 		return nil, fmt.Errorf("secret length invalid")
 	}
 
 	// build blst.SecretKey from LE just for this sign
 	var sk signer.SecretKey
 	if sk.FromLEndian(le) == nil {
-		MemoryWipe(le)
+		secure.MemoryWipe(le)
 		return nil, fmt.Errorf("invalid scalar")
 	}
 
 	sig, _ = signer.SignCompressed(&sk, signBytes)
-	MemoryWipe(le)
+	secure.MemoryWipe(le)
 	sk.Zeroize()
 	err = <-writeChan
 	if err != nil {

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"path"
 	"time"
 
@@ -13,13 +12,8 @@ import (
 
 	"github.com/tez-capital/tezsign/broker"
 	"github.com/tez-capital/tezsign/common"
-	"github.com/tez-capital/tezsign/signer"
 )
 
-type signReq struct {
-	KeyID      string `json:"key_id"`
-	PayloadHex string `json:"payload_hex"`
-}
 type signResp struct {
 	Signature string `json:"signature"`
 }
@@ -29,7 +23,7 @@ type tz4CacheEntry struct {
 	pop       string
 }
 
-func buildFiberApp(getB func() *broker.Broker, l *slog.Logger, allowedTZ4 map[string]struct{}, cache map[string]tz4CacheEntry) *fiber.App {
+func buildFiberApp(getB func() *broker.Broker, allowedTZ4 map[string]struct{}, cache map[string]tz4CacheEntry) *fiber.App {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 		ReadTimeout:           10 * time.Second,
@@ -140,7 +134,7 @@ func buildFiberApp(getB func() *broker.Broker, l *slog.Logger, allowedTZ4 map[st
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		blSig, err := signer.EncodeBLSignature(sig)
+		blSig, err := EncodeBLSignature(sig)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}

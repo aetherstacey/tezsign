@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/tez-capital/tezsign/broker"
 	"github.com/tez-capital/tezsign/common"
-	"github.com/tez-capital/tezsign/signer"
+	"github.com/tez-capital/tezsign/signerpb"
 )
 
 type keyStateJSON struct {
@@ -37,7 +37,7 @@ type keyStatusJSON struct {
 	StateCorrupted       bool   `json:"state_corrupted"`
 }
 
-func getKeysStatusJSON(ks *signer.KeyStatus) keyStatusJSON {
+func getKeysStatusJSON(ks *signerpb.KeyStatus) keyStatusJSON {
 	return keyStatusJSON{
 		ID:                   ks.GetKeyId(),
 		LockState:            ks.GetLockState().String(),
@@ -125,7 +125,7 @@ func isTTY(f *os.File) bool {
 //  1. TEZSIGN_UNLOCK_PASS env
 //  2. Bubble Tea masked prompt if stdout is a TTY
 //
-// Returns a zero-copy []byte the caller must wipe via keychain.MemoryWipe.
+// Returns a zero-copy []byte the caller must wipe via secure.MemoryWipe.
 func obtainPassword(prompt string, withEnv bool) ([]byte, error) {
 	// 1) env
 
@@ -401,7 +401,7 @@ func runKeyPicker(b *broker.Broker) (selectedIDs []string, aborted bool, err err
 	return selectedIDs, false, nil
 }
 
-func statusRows(statuses []*signer.KeyStatus) []statusRow {
+func statusRows(statuses []*signerpb.KeyStatus) []statusRow {
 	rows := make([]statusRow, 0, len(statuses))
 	for _, ks := range statuses {
 		state := ks.GetLockState().String()
