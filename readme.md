@@ -87,6 +87,7 @@ Assuming your host app is available in your path as `tezsign`:
 1.  **Confirm Device Connection**
     ```bash
     ./tezsign list-devices
+    ./tezsign version
     ```
 
 2.  **Initialize the Device**
