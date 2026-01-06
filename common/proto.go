@@ -166,6 +166,18 @@ func ReqSetLevel(b *broker.Broker, keyID string, level uint64) (bool, error) {
 	return resp.GetOk().GetOk(), nil
 }
 
+func ReqVersion(b *broker.Broker) (*signerpb.VersionResponse, error) {
+	resp, err := doReq(b, &signerpb.Request{
+		Payload: &signerpb.Request_Version{
+			Version: &signerpb.VersionRequest{},
+		},
+	}, 3*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetVersion(), nil
+}
+
 func doReq(b *broker.Broker, req *signerpb.Request, timeout time.Duration) (*signerpb.Response, error) {
 	pb, err := proto.Marshal(req)
 	if err != nil {

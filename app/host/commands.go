@@ -52,6 +52,46 @@ func cmdListDevices() *cli.Command {
 	}
 }
 
+func cmdVersion() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Show gadget image version and build date",
+		Action: func(ctx context.Context, c *cli.Command) error {
+			h := mustHost(ctx)
+
+			ver, err := common.ReqVersion(h.Session.Broker)
+			if err != nil {
+				var re *common.RemoteError
+				if errors.As(err, &re) && re.Code == 1000 {
+					return fmt.Errorf("gadget does not support version query; update required: %w", err)
+				}
+				return err
+			}
+
+			out := struct {
+				Version   string `json:"version"`
+				BuildDate string `json:"build_date"`
+			}{
+				Version:   strings.TrimSpace(ver.GetVersion()),
+				BuildDate: strings.TrimSpace(ver.GetBuildDate()),
+			}
+			if out.Version == "" {
+				out.Version = "unknown"
+			}
+			if out.BuildDate == "" {
+				out.BuildDate = "unknown"
+			}
+
+			if !isTTY(os.Stdout) {
+				return json.NewEncoder(os.Stdout).Encode(out)
+			}
+
+			fmt.Printf("Version: %s\nBuild date: %s\n", out.Version, out.BuildDate)
+			return nil
+		},
+	}
+}
+
 func cmdInit() *cli.Command {
 	return &cli.Command{
 		Name:  "init",

@@ -65,7 +65,7 @@ func handleSignAndStatus(base func(context.Context, []byte) ([]byte, error)) bro
 			return marshalErr(1, fmt.Sprintf("bad protobuf: %v", err)), nil
 		}
 		switch req.Payload.(type) {
-		case *signerpb.Request_Sign, *signerpb.Request_Status:
+		case *signerpb.Request_Sign, *signerpb.Request_Status, *signerpb.Request_Version:
 			// allowed on IF0
 		default:
 			return marshalErr(98, "wrong interface: use management (IF1) for this request"), nil
@@ -313,6 +313,33 @@ func handleRequestsFactory(fs *keychain.FileStore, kr *keychain.KeyRing, l *slog
 			return proto.Marshal(&signerpb.Response{
 				Payload: &signerpb.Response_Logs{
 					Logs: &signerpb.LogsResponse{Lines: lines},
+				},
+			})
+
+		case *signerpb.Request_Version:
+			readTrim := func(filePath string) string {
+				b, err := os.ReadFile(filePath)
+				if err != nil {
+					return ""
+				}
+				return strings.TrimSpace(string(b))
+			}
+
+			version := readTrim(common.ImageVersionFile)
+			if version == "" {
+				version = "unknown"
+			}
+			buildDate := readTrim(common.ImageBuildDateFile)
+			if buildDate == "" {
+				buildDate = "unknown"
+			}
+
+			return proto.Marshal(&signerpb.Response{
+				Payload: &signerpb.Response_Version{
+					Version: &signerpb.VersionResponse{
+						Version:   version,
+						BuildDate: buildDate,
+					},
 				},
 			})
 

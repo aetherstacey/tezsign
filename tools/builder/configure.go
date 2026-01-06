@@ -255,8 +255,18 @@ func patchAppPartition(imgPath string, appPartition part.Partition, flavour imag
 
 	// inject .image-flavour from IMAGE_ID env variable
 	flavourFilePath := path.Join(appfs, ".image-flavour")
-	if err := os.WriteFile(flavourFilePath, []byte(os.Getenv("IMAGE_ID")), 0444); err != nil {
+	if err := os.WriteFile(flavourFilePath, []byte(strings.TrimSpace(os.Getenv("IMAGE_ID"))), 0444); err != nil {
 		return fmt.Errorf("failed to write image flavour file %s: %w", flavourFilePath, err)
+	}
+
+	versionFilePath := path.Join(appfs, ".image-version")
+	if err := os.WriteFile(versionFilePath, []byte(resolveImageVersion()), 0444); err != nil {
+		return fmt.Errorf("failed to write image version file %s: %w", versionFilePath, err)
+	}
+
+	dateFilePath := path.Join(appfs, ".image-date")
+	if err := os.WriteFile(dateFilePath, []byte(resolveImageBuildDate()), 0444); err != nil {
+		return fmt.Errorf("failed to write image date file %s: %w", dateFilePath, err)
 	}
 
 	return nil

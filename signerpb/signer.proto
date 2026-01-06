@@ -100,6 +100,13 @@ message LogsResponse {
   repeated string lines = 1; // newest last
 }
 
+// ---- version ----
+message VersionRequest {}
+message VersionResponse {
+  string version    = 1;
+  string build_date = 2; // RFC3339 (UTC) if available
+}
+
 // ---- init master ----
 message InitMasterRequest {
   bool  deterministic = 1; // true => HD mode; false => random-only mode
@@ -151,6 +158,7 @@ message Request {
     InitInfoRequest   init_info   = 8;
     SetLevelRequest   set_level   = 9;
     DeleteKeysRequest delete_keys = 10;
+    VersionRequest    version     = 11;
   }
 }
 
@@ -164,6 +172,7 @@ message Response {
     LogsResponse       logs        = 6;
     InitInfoResponse   init_info   = 7;
     DeleteKeysResponse delete_keys = 8;
+    VersionResponse    version     = 9;
 
     Ok                 ok          = 15; // for init_master & set_level
     Error              error       = 16;

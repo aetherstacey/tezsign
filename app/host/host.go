@@ -31,7 +31,8 @@ func main() {
 		},
 		After: closeSession,
 		Commands: []*cli.Command{
-			withBefore(cmdListDevices(), withLoggerOnly()),      // no session needed
+			withBefore(cmdListDevices(), withLoggerOnly()), // no session needed
+			withBefore(cmdVersion(), withSession(common.ChanMgmt)),
 			withBefore(cmdRun(), withSession(common.ChanSign)),  // signer interface
 			withBefore(cmdInit(), withSession(common.ChanMgmt)), // mgmt interface
 			withBefore(cmdList(), withSession(common.ChanMgmt)),
