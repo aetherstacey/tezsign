@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -78,6 +80,19 @@ func performAppBinaryUpdate(binaryPath, destination string, logger *slog.Logger)
 	}
 	logger.Info("Using image flavour", "flavour", flavour)
 
+	currentHash, err := hashFSFile(fs, "/tezsign")
+	if err == nil {
+		sourceHash, err := hashFile(binaryPath)
+		if err != nil {
+			logger.Debug("Failed to hash gadget binary; continuing with update", "error", err)
+		} else if sourceHash == currentHash {
+			logger.Info("Gadget binary already matches source; skipping update", "sha256", sourceHash)
+			return nil
+		}
+	} else {
+		logger.Debug("Failed to read existing gadget binary; continuing with update", "error", err)
+	}
+
 	in, err := os.Open(binaryPath)
 	if err != nil {
 		return fmt.Errorf("failed to open gadget binary: %w", err)
@@ -129,6 +144,32 @@ func writeAppViaMount(binaryPath, flavour string, logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return hashReader(f)
+}
+
+func hashFSFile(fs filesystem.FileSystem, path string) (string, error) {
+	f, err := fs.OpenFile(path, os.O_RDONLY)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return hashReader(f)
+}
+
+func hashReader(r io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func ensureMountAvailable() error {

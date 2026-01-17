@@ -186,13 +186,22 @@ func performUpdate(source, destination string, kind UpdateKind, logger *slog.Log
 
 	switch kind {
 	case UpdateKindFull:
-		existingTezsignID := backupTezsignID(dstImg, destinationAppPartition, logger)
 		sourceImg, sourceBootPartition, sourceRootfsPartition, sourceAppPartition, err := loadImage(sourcePath, diskfs.ReadOnly)
 		if err != nil {
 			return fmt.Errorf("failed to load source image: %w", err)
 		}
 		defer sourceImg.Close()
 
+		sourceVersion := imageVersionForPartition(sourceImg, sourceAppPartition, logger, "source")
+		if sourceVersion != "" {
+			destVersion := imageVersionForPartition(dstImg, destinationAppPartition, logger, "destination")
+			if destVersion != "" && destVersion == sourceVersion {
+				logger.Info("Image version already matches source; skipping update", "version", sourceVersion)
+				return nil
+			}
+		}
+
+		existingTezsignID := backupTezsignID(dstImg, destinationAppPartition, logger)
 		if (sourceBootPartition == nil || destinationBootPartition == nil) && (sourceBootPartition != destinationBootPartition) {
 			return errors.New("boot partition missing in source image or destination device, cannot proceed with full update")
 		}
@@ -302,6 +311,44 @@ func readImageFlavour(fs filesystem.FileSystem) (string, error) {
 		return "", nil
 	}
 	return flavour, nil
+}
+
+func readImageVersion(fs filesystem.FileSystem) (string, error) {
+	f, err := fs.OpenFile("/.image-version", os.O_RDONLY)
+	if err != nil {
+		// Some filesystems return a custom error string rather than os.ErrNotExist; treat any failure as "missing".
+		return "", nil
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(string(data))
+	if version == "" || strings.EqualFold(version, "unknown") {
+		return "", nil
+	}
+	return version, nil
+}
+
+func imageVersionForPartition(d *disk.Disk, appPartition part.Partition, logger *slog.Logger, label string) string {
+	if appPartition == nil {
+		return ""
+	}
+	fs, err := filesystemForPartition(d, appPartition)
+	if err != nil {
+		logger.Debug("Failed to open app filesystem for image version", "error", err, "disk", label)
+		return ""
+	}
+	defer fs.Close()
+
+	version, err := readImageVersion(fs)
+	if err != nil {
+		logger.Debug("Failed to read image version", "error", err, "disk", label)
+		return ""
+	}
+	return version
 }
 
 func backupTezsignID(d *disk.Disk, appPartition part.Partition, logger *slog.Logger) string {
